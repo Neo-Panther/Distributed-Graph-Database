@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/msg.h>
+
 // msg q permissions
 #define PERMS 0600
 // msg structure for communication
