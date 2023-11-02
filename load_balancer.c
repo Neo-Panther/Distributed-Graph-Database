@@ -1,8 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/msg.h>
 #include "./utilities.h"
 
 int main(void){
@@ -25,7 +22,7 @@ int main(void){
 
   while(1){
     // listen to requests from client
-    memset(buf.mtext, 0, 1000);
+    memset(buf.mtext, 0, sizeof(buf.mtext));
     printf("\nLoad Balancer Waiting for messages from client(s)...\n");
     if (msgrcv (msgqid, &buf, sizeof(buf.mtext), LOAD_BALANCER, MSG_NOERROR) == -1){
       perror ("msgrcv");
@@ -84,11 +81,11 @@ int main(void){
     }
   }
 
-  // end load_balancer
   // delete message queue (cleanup)
   if (msgctl(msgqid, IPC_RMID, NULL) == -1){
     perror("msgctl");
     exit(1);
   }
+  // terminate load_balancer
   return 0;
 }

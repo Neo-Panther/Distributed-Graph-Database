@@ -1,15 +1,13 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/msg.h>
 #include "./utilities.h"
 
 int main(void) {  
-  /**** Initializing variables used *****/
+  /**Initializing Variables**/
   struct msgbuf buf;
   int msgqid;
   key_t key = getMsgQKey();
   // to save the input by user
   char input;
+  /**************************/
 
   // get the queue details
   if ((msgqid = msgget(key, PERMS)) == -1){
