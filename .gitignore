@@ -1,3 +1,4 @@
 *.out
 *.gch
 .vscode
+test.c

@@ -24,6 +24,7 @@ int main(void){
     // listen to requests from client
     memset(buf.mtext, 0, sizeof(buf.mtext));
     printf("\nLoad Balancer Waiting for messages from client(s)...\n");
+    // receive a message, truncate it if longer than buf.mtext's size
     if (msgrcv (msgqid, &buf, sizeof(buf.mtext), LOAD_BALANCER, MSG_NOERROR) == -1){
       perror ("msgrcv");
       exit(1);

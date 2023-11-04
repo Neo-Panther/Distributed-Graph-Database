@@ -2,9 +2,17 @@
 #define UTILITIES_H
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
 #include <sys/msg.h>
 
-// msg q permissions
+// shared memory buffer size
+#define SHM_BUF_SIZE 901*sizeof(int)
+
+// named semaphore name
+#define SEMAPHORE "/semaphore"
+
+// ipc permissions
 #define PERMS 0600
 // msg structure for communication
 struct msgbuf {
