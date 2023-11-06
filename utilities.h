@@ -26,7 +26,7 @@ key_t getMsgQKey(){
   key_t key;
   if ((key = ftok("load_balancer.c", 'A')) == -1){
     perror("ftok");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   return key;
 }

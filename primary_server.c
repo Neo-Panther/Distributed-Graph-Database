@@ -164,18 +164,18 @@ int main(void){
   key = getMsgQKey();
   if ((msgqid = msgget(key, PERMS)) == -1){
     perror("msgget");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   /*****************************************/
 
   /******Initializing Semaphores and Mutexes*******/
   if((write_semaphore = sem_open(WRITE_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
     perror("sem_open-write");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   if((read_semaphore = sem_open(READ_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
     perror("sem_open-read");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   // mutex attr is non-portable, thus we always use defaults. This function does not fail
   pthread_mutex_init(&mutex2, NULL);

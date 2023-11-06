@@ -12,7 +12,7 @@ int main(void){
     char file_name[10];
     if ((msgqid = msgget(key, PERMS)) == -1){
         perror("msgget");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     int msg_len=0;
 
@@ -40,7 +40,7 @@ int main(void){
         buf.mtype  = LOAD_BALANCER;
         if(msgsnd(msgqid, &buf, msg_len, 0) == -1){
 			perror("msgsnd");
-			exit(1);
+			exit(EXIT_FAILURE);
 	    }
 
 
@@ -99,12 +99,12 @@ int main(void){
 
             if(shmdt(shmPtr)== -1){
                 perror("error in detaching\n");
-                exit(-6);
+                exit(EXIT_FAILURE);
             
             }
             if(shmctl(shmid,IPC_RMID,0) == -1){
                 perror("error in shmctl");
-                exit(-7);
+                exit(EXIT_FAILURE);
             }
 
 
