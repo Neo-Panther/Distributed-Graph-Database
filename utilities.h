@@ -9,8 +9,9 @@
 // shared memory buffer size
 #define SHM_BUF_SIZE 901*sizeof(int)
 
-// named semaphore name
-#define SEMAPHORE "/semaphore"
+// named semaphores' names
+#define WRITE_SEMAPHORE "/write"
+#define READ_SEMAPHORE "/read"
 
 // ipc permissions
 #define PERMS 0600

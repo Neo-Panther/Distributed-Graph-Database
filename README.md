@@ -10,3 +10,5 @@ Let's GOOOO!!!
 *NOTE*: We will solve the reader writer problem by giving priority to writers (no new reader may access the graph DB if a writer has requested access to it, until it is done)
 
 *NOTE2*: Use pthread_exit in main of multi threaded processes to wait for all threads to complete before exiting main.
+
+*NOTE3*: mutex3 ensures that if both reader(s) and writer(s) are waiting for release of reader semaphore, writer(s) enter first, since reader(s) also have to wait for mutex3 befor reader semaphore.
