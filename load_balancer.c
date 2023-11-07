@@ -1,6 +1,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "./utilities.h"
+#include <sys/shm.h>
 
 int main(void){
   printf("Load Balancer Started\n");
@@ -19,6 +20,22 @@ int main(void){
     exit(1);
   }
   printf("Msg Q created");
+
+  // create process sync shm
+  int shmid=shmget(SYNC_SHM_KEY, SYNC_SHM_SIZE, PERMS|IPC_CREAT);
+  if(shmid==-1){
+    perror("shmget-sync");
+    exit(EXIT_FAILURE);
+  }
+  int* syncShmPtr = shmat(shmid,NULL,0);
+  if(syncShmPtr == (void*)(intptr_t)-1){
+    perror("shmat-sync");
+    exit(EXIT_FAILURE);
+  }
+
+  // initialize sync shm
+  syncShmPtr[SHM_READ_COUNT] = 0;
+  syncShmPtr[SHM_SEQUENCE_NUMBER] = 101;
 
   while(1){
     // listen to requests from client
@@ -82,11 +99,22 @@ int main(void){
     }
   }
 
+  // detach shm
+  if(shmdt(syncShmPtr)== -1){
+    perror("shmdt-sync");
+    exit(EXIT_FAILURE);
+  }
+  // delete sync shm
+  if(shmctl(shmid, IPC_RMID, 0) == -1){
+    perror("shmctl");
+    exit(EXIT_FAILURE);
+  }
+
   // delete message queue (cleanup)
   if (msgctl(msgqid, IPC_RMID, NULL) == -1){
     perror("msgctl");
     exit(1);
   }
   // terminate load_balancer
-  return 0;
+  return EXIT_SUCCESS;
 }

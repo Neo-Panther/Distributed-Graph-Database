@@ -49,13 +49,13 @@ int main(void){
             if(shmid==-1)
             {
                 perror("error in shmget\n");
-                exit(-1);
+                exit(EXIT_FAILURE);
             }
             shmPtr= shmat(shmid,NULL,0);
-            if(shmPtr==(void*)-1)
+            if(shmPtr==(void*)(intptr_t)-1)
             {
                 perror("shared memory error\n");
-                exit(-2);
+                exit(EXIT_FAILURE);
             }
         if(operation_number==1 || operation_number ==2){
 

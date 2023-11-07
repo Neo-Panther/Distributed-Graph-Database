@@ -5,12 +5,21 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/shm.h>
+#include <stdint.h>
 
 // shared memory buffer size
 #define SHM_BUF_SIZE 901*sizeof(int)
 
 // named semaphores' names
-
+#define WRITE_SEMAPHORE "/write"
+#define READ_SEMAPHORE "/read"
+#define SYNC_SHM_SEMAPHORE "/syncshm"
+// process sync shm key
+#define SYNC_SHM_KEY 1025
+#define SYNC_SHM_SIZE 3*sizeof(int)
+#define SHM_READ_COUNT 0
+#define SHM_SEQUENCE_NUMBER 1
 
 // ipc permissions
 #define PERMS 0600

@@ -1,11 +1,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/shm.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <semaphore.h>
-#include <stdint.h>
 #include "./utilities.h"
 
 // TODO: handle starvation of readers by using sequence number ordering => allow readers before writers if their sequence number is lower
@@ -16,8 +14,15 @@ struct msgbuf buf;
 int msgqid;
 key_t key;
 
-// variables for synchronization between threads
+// sync shm ptr
+int* syncShmPtr;
 
+// variables for synchronization between threads
+pthread_mutex_t mutex2;
+unsigned int writer_count;
+sem_t* write_semaphore;
+sem_t* read_semaphore;
+sem_t* sync_shm_semaphore;
 /*******************************************************/
 
 void *writer(void* args){
@@ -57,6 +62,43 @@ void *writer(void* args){
   printf("Writer Thread received number of nodes: %d\n", number_of_nodes);
   // SYNC: Writer <Entry Section> Starts
   
+  if(sem_wait(sync_shm_semaphore) == -1){
+    perror("sem_wait-0");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  while(syncShmPtr[SHM_SEQUENCE_NUMBER] < sequence_number){
+    if(sem_post(sync_shm_semaphore) == -1){
+      perror("sem_post-0");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+    sleep(1);
+    if(sem_wait(sync_shm_semaphore) == -1){
+      perror("sem_wait-0");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
+  if(sem_post(sync_shm_semaphore) == -1){
+    perror("sem_post-0");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  if(pthread_mutex_lock(&mutex2) != 0){
+    printf("Mutex not initialized properly-1\n");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+
+  writer_count += 1;
+  if(writer_count == 1){
+    if(sem_wait(read_semaphore) == -1){
+      perror("sem_wait-1");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
+  pthread_mutex_unlock(&mutex2);
+  if(sem_wait(write_semaphore) == -1){
+    perror("sem_wait-2");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+
   // <Entry Section> Ends
   // <CRITICAL SECTION> starts
   // open the file in write mode (it is created if it doesn't exist)
@@ -105,6 +147,20 @@ void *writer(void* args){
   // <CRITICAL SECTION> ends
   // SYNC: Writer <Exit Section>
 
+  if(sem_post(write_semaphore) == -1){
+    perror("sem_post-1");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  pthread_mutex_lock(&mutex2);
+  writer_count -= 1;
+  if(writer_count == 0){
+    if(sem_post(read_semaphore) == -1){
+      perror("sem_post-2");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
+  pthread_mutex_unlock(&mutex2);
+
   // <Exit Section> Ends
 
   // detach the shmPtr, ! destorying shm is the work of client
@@ -128,10 +184,12 @@ void *writer(void* args){
 
 int main(void){
   /**Declaring main thread Local Variables**/
-  // thread id variable
-  pthread_t tid;
   // thread inp variable (pointer)
   char *tin;
+  // create an array of tids to join them later (assume sequence number max till 100 => max 100 threads)
+  pthread_t tids[100];
+  // index of the first unfilled tid
+  int tidx = 0;
   /*****************************************/
 
   /******Initializing Msg Q Variables*******/
@@ -144,7 +202,34 @@ int main(void){
 
   /******Initializing Semaphores and Mutexes*******/
 
+  if((write_semaphore = sem_open(WRITE_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-write");
+    exit(1);
+  }
+  if((read_semaphore = sem_open(READ_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-read");
+    exit(1);
+  }
+  if((sync_shm_semaphore = sem_open(SYNC_SHM_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-sync");
+    exit(1);
+  }
+  // mutex attr is non-portable, thus we always use defaults. This function does not fail
+  pthread_mutex_init(&mutex2, NULL);
+  writer_count = 0;
+
   /*****************************************/
+
+  // getting the sync shm
+  int shmid = shmget(SYNC_SHM_KEY, SYNC_SHM_SIZE, PERMS);
+  if(shmid == -1){
+    perror("shmget-sync");
+    exit(EXIT_FAILURE);
+  }
+  if((syncShmPtr = shmat(shmid,NULL,0)) == (void*)(intptr_t)-1){
+    perror("shmat-sync");
+    exit(EXIT_FAILURE);
+  }
 
   while(1){
     // listen to requests from the load balancer
@@ -161,6 +246,13 @@ int main(void){
     // check if it is a termination message
     if (buf.mtext[0] == ')'){
       printf("Primary Server Terminating...\n");
+      while(tidx > 0){
+        int x;
+        if((x = pthread_join(tids[--tidx], NULL)) != 0){
+          printf("Thread join failed with error-bfs %d\n", x);
+          pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+        }
+      }
       break;
     }
 
@@ -172,13 +264,21 @@ int main(void){
 
     // create thread with thread id in tid (overwritten in tid), default attributes, write subroutine and tin as its input
     printf("Primary Server Sending input to thread:%s\n", tin);
-    if(pthread_create(&tid, NULL, writer, tin) != 0){
+    if(pthread_create(&(tids[tidx++]), NULL, writer, tin) != 0){
       perror("pthread_create");
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
   }
+  // detach the sync shm
+  if(shmdt(syncShmPtr)== -1){
+    perror("shmdt-sync");
+    exit(EXIT_FAILURE);
+  }
   // unlink named semaphores and destroy mutex
-
+  sem_unlink(READ_SEMAPHORE);
+  sem_unlink(WRITE_SEMAPHORE);
+  sem_unlink(SYNC_SHM_SEMAPHORE);
+  pthread_mutex_destroy(&mutex2);
   // wait for all threads to terminate before exiting
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }

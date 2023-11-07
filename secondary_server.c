@@ -1,12 +1,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/shm.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <semaphore.h>
-#include <stdint.h>
 #include "./utilities.h"
+#include "./dfs_bfs.h"
+#define MUTEX3 "/mutexthree"
 
 /**Declaring global variables (shared between all threads)**/
 // msg q vars
@@ -16,180 +16,13 @@ key_t key;
 
 // variables for synchronization between threads
 /*******************************************************/
-pthread_mutex_t output_mutex;
-pthread_mutex_t queue_tail_mutex;
-// struct to send input for graph traversal
-struct common_input {
-  int number_of_nodes;
-  int** adj_matrix;
-  int* output_array;
-  int* visited;
-  int output_index;  // TODO: need protection
-};
+sem_t* mutex3;  // name
+sem_t* write_semaphore;
+sem_t* read_semaphore;
+sem_t* sync_shm_semaphore;
 
-struct common_input_bfs {
-  int number_of_nodes;
-  int** adj_matrix;
-  int* output_array;
-  int* visited;
-  int* queue;
-  int queue_tail;  // TODO: need protection
-  int output_index;  // TODO: need protection
-};
-
-// struct to send input to bfs nodes (bfs_helper) for level order traversal
-struct bfs_input{
-  int current_vertex;  // need to be reassigned for each thread
-  struct common_input_bfs* common;
-};
-
-struct dfs_input{
-  int current_vertex;  // need to be reassigned for each thread
-  struct common_input* common;
-};
-
-// agrs of type dfs input
-void* dfs(void* args){
-  struct dfs_input* inp = (struct dfs_input*)args;
-  // create a local copy of current vertex
-  int current_vertex = inp->current_vertex;
-  struct common_input* common = inp->common;
-  free(inp);
-  common->visited[current_vertex] = 1;
-  printf("DFS Thread:%lu:Current vertex b4 calls<%d> visited::", pthread_self(),current_vertex);
-  for(int i = 0; i < common->number_of_nodes; i++)
-    printf("%d ", common->visited[i]);
-    printf("\n");
-  // create an array of tids to join them later (max n-1 new threads possible - other than this thread)
-  pthread_t* tids = (pthread_t*)calloc(common->number_of_nodes-1, sizeof(pthread_t));
-  // index of the first unfilled tid
-  int tidx = 0;
-  for(int v = 0; v < common->number_of_nodes; v++){
-    if(!common->visited[v] && common->adj_matrix[current_vertex][v]){
-      printf("DFS Thread:%lu: going from CV:%d: to:%d:\n", pthread_self(), current_vertex, v);
-      inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
-      inp->current_vertex = v;
-      inp->common = common;
-      int x;
-      if((x = pthread_create(&(tids[tidx++]), NULL, dfs, (void*)inp)) != 0){
-        printf("Thread creation failed with error-dfs %d\n", x);
-        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-      }
-    }
-  }
-  printf("DFS Thread:%lu:Current vertex<%d> aft calls\n", pthread_self(), current_vertex);
-  if(!tidx){
-    printf("DFS Thread:%lu:Adding CV:%d at output_index:%d\n", pthread_self(),current_vertex, common->output_index);
-    // this is the last vertex on a path
-    pthread_mutex_lock(&output_mutex);
-    common->output_array[(common->output_index)++] = current_vertex;
-    pthread_mutex_unlock(&output_mutex);
-  }
-  // join all created threads
-  while(tidx > 0){
-    int x;
-    if((x = pthread_join(tids[--tidx], NULL)) != 0){
-      printf("Thread join failed with error-dfs %d\n", x);
-      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-    }
-  }
-  printf("DFS Thread:%lu: ending\n", pthread_self());
-  // free calloced memory
-  free(tids);
-  pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
-}
-
-void* bfs_helper(void* args){
-  // extract input info and free the address
-  struct bfs_input* inp = (struct bfs_input*)args;
-  struct common_input_bfs* common = inp->common;
-  int current_vertex = inp->current_vertex;
-  printf("BFS Helper Thread:%lu:Start CV:%d\n", pthread_self(), current_vertex);
-  free(inp);
-  printf("llk\n");
-  for(int v = 0; v < common->number_of_nodes; v++){
-    if(!common->visited[v] && common->adj_matrix[current_vertex][v]){
-      printf("BFS Helper Thread:%lu:add v to q:%d\n", pthread_self(), v);
-      pthread_mutex_lock(&queue_tail_mutex);
-      common->queue[(common->queue_tail)++] = v;
-      pthread_mutex_unlock(&queue_tail_mutex);
-      common->visited[v] = 1;
-    }
-  }
-  printf("knf\n");
-  return (void*)(intptr_t)EXIT_SUCCESS;
-}
-
-void* bfs(void* args){
-  struct dfs_input* inp = (struct dfs_input*)args;
-  int current_vertex = inp->current_vertex;
-  struct common_input* common = inp->common;
-  free(inp);
-  common->visited[current_vertex] = 1;
-  printf("BFS Main Thread:%lu:Current vertex b4 calls<%d> visited::", pthread_self(),current_vertex);
-  for(int i = 0; i < common->number_of_nodes; i++)
-    printf("%d ", common->visited[i]);
-    printf("\n");
-  // create an array of tids to join them later (max n-1 new threads possible - other than this thread)
-  pthread_t* tids = (pthread_t*)calloc(common->number_of_nodes-1, sizeof(pthread_t));
-  // index of the first unfilled tid
-  int tidx = 0;
-
-  // populate the helper's struct
-  struct common_input_bfs* common_bfs = (struct common_input_bfs*)calloc(1, sizeof(struct common_input_bfs));
-  common_bfs->queue_tail = 1;
-  int queue_head = 0;
-  common_bfs->queue = (int*)calloc(common->number_of_nodes, sizeof(int));
-  common_bfs->queue[0] = current_vertex;
-  common_bfs->adj_matrix = common->adj_matrix;
-  common_bfs->number_of_nodes = common->number_of_nodes;
-  common_bfs->output_array = common->output_array;
-  common_bfs->output_index = common->output_index;
-  common_bfs->visited = common->visited;
-
-  // go to a new level sequentially
-  while(queue_head < common_bfs->queue_tail){
-    printf("BFS Thread Main:%lu:queue_head:%d:tail:%d:visited::", pthread_self(), queue_head, common_bfs->queue_tail);
-    for(int i = 0; i < common->number_of_nodes; i++)
-      printf("%d ", common->visited[i]);
-    printf("\n");
-    printf("BFS Thread Main:%lu:q::", pthread_self());
-    for(int i = queue_head; i < common_bfs->queue_tail; i++)
-      printf("%d ", common_bfs->queue[i]);
-    printf("\n");
-    int end = common_bfs->queue_tail;
-
-    struct bfs_input* helper_input;
-
-    // start new thread for each node at this level
-    while(queue_head < end){
-      int x;
-      common_bfs->output_array[(common->output_index)++] = common_bfs->queue[queue_head];
-      helper_input = (struct bfs_input*)calloc(1, sizeof(struct bfs_input));
-      helper_input->common = common_bfs;
-      helper_input->current_vertex = common_bfs->queue[queue_head++];
-      if((x = pthread_create(&(tids[tidx++]), NULL, bfs_helper, (void*)helper_input)) != 0){
-        printf("Thread creation failed with error-dfs %d\n", x);
-        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-      }
-    }
-    // join all threads created above (complete the concurrent traversal of a level)
-    while(tidx > 0){
-      int x;
-      if((x = pthread_join(tids[--tidx], NULL)) != 0){
-        printf("Thread join failed with error-bfs %d\n", x);
-        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-      }
-    }
-  }
-  // free calloced memory
-  free(common_bfs->queue);
-  free(common_bfs);
-  free(tids);
-  // current vertex freed in helper
-  // visited and adj_matrix will be freed outside
-  pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
-}
+// sync shm ptr
+int* syncShmPtr;
 
 void *reader(void* args){
   // get input in correct format
@@ -232,9 +65,49 @@ void *reader(void* args){
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
   printf("Reader received starting vertex: %d\n", starting_vertex);
-  // TODO: SYNC: Reader <Entry Section> Starts
+  // SYNC: Reader <Entry Section> Starts
+
+  if(sem_wait(mutex3) == -1){
+    perror("sem_wait-0");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  if(sem_wait(read_semaphore) == -1){
+    perror("sem_wait-1");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  if(sem_wait(sync_shm_semaphore) == -1){
+    perror("sem_wait-2");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  syncShmPtr[SHM_READ_COUNT]++;
+  if(syncShmPtr[SHM_SEQUENCE_NUMBER] > sequence_number)
+    syncShmPtr[SHM_SEQUENCE_NUMBER] = sequence_number;
+  if(syncShmPtr[SHM_READ_COUNT] == 1){
+    if(sem_post(sync_shm_semaphore) == -1){
+      perror("sem_post-2");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+    if(sem_wait(write_semaphore) == -1){
+      perror("sem_wait-4");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  } else {
+    if(sem_post(sync_shm_semaphore) == -1){
+      perror("sem_post-2");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
+  if(sem_post(read_semaphore) == -1){
+    perror("sem_post-1");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  if(sem_post(mutex3) == -1){
+    perror("sem_post-0");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
 
   // <Entry Section> Ends
+  printf("Entry->Critical\n");
   // <CRITICAL SECTION> starts
   // open the file in read mode (it is assumed that it exists)
   FILE* file = fopen(file_name, "r");
@@ -274,7 +147,25 @@ void *reader(void* args){
   }
 
   // <CRITICAL SECTION> ends
-  // TODO: SYNC: Reader <Exit Section> Starts
+  // SYNC: Reader <Exit Section> Starts
+
+  if(sem_wait(sync_shm_semaphore) == -1){
+    perror("sem_wait-3");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
+  syncShmPtr[SHM_READ_COUNT]--;
+  if(syncShmPtr[SHM_SEQUENCE_NUMBER] == sequence_number)
+    syncShmPtr[SHM_SEQUENCE_NUMBER] = 101;
+  if(syncShmPtr[SHM_READ_COUNT] == 0){
+    if(sem_post(write_semaphore) == -1){
+      perror("sem_post-5");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
+  if(sem_post(sync_shm_semaphore) == -1){
+    perror("sem_post-3");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
 
   // <Exit Section> Ends
   // save thread tid for joining
@@ -345,10 +236,12 @@ int main(int argc, char const *argv[]){
   int server_number = atoi(argv[1]);
 
   /**Declaring main thread Local Variables**/
-  // thread id variable
-  pthread_t tid;
   // thread inp variable (pointer)
   char *tin;
+  // create an array of tids to join them later (assume sequence number max till 100 => max 100 threads)
+  pthread_t tids[100];
+  // index of the first unfilled tid
+  int tidx = 0;
   /*****************************************/
 
   /******Initializing Msg Q Variables*******/
@@ -360,9 +253,38 @@ int main(int argc, char const *argv[]){
   /*****************************************/
 
   /******Initializing Semaphores and Mutexes*******/
+  if((write_semaphore = sem_open(WRITE_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-write");
+    exit(1);
+  }
+  if((read_semaphore = sem_open(READ_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-read");
+    exit(1);
+  }
+  // mutex attr is non-portable, thus we always use defaults. This function does not fail
+  if((sync_shm_semaphore = sem_open(SYNC_SHM_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-read");
+    exit(1);
+  }
+  if((mutex3 = sem_open(MUTEX3, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-read");
+    exit(1);
+  }
   pthread_mutex_init(&queue_tail_mutex, NULL);
   pthread_mutex_init(&output_mutex, NULL);
   /*****************************************/
+
+  // get sync semaphore
+  // getting the sync shm
+  int shmid = shmget(SYNC_SHM_KEY, SYNC_SHM_SIZE, PERMS);
+  if(shmid == -1){
+    perror("shmget-sync");
+    exit(EXIT_FAILURE);
+  }
+  if((syncShmPtr = shmat(shmid,NULL,0)) == (void*)(intptr_t)-1){
+    perror("shmat-sync");
+    exit(EXIT_FAILURE);
+  }
 
   while(1){
     // listen to requests from the load balancer
@@ -379,6 +301,13 @@ int main(int argc, char const *argv[]){
     // check if it is a termination message
     if (buf.mtext[0] == ')'){
       printf("Secondary Server %d Terminating...\n", server_number);
+      while(tidx > 0){
+        int x;
+        if((x = pthread_join(tids[--tidx], NULL)) != 0){
+          printf("Thread join failed with error-bfs %d\n", x);
+          pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+        }
+      }
       break;
     }
 
@@ -390,13 +319,18 @@ int main(int argc, char const *argv[]){
 
     // create thread with thread id in tid (overwritten in tid), default attributes, write subroutine and tin as its input
     printf("Secondary Server %d Sending input to thread:%s\n", server_number, tin);
-    if(pthread_create(&tid, NULL, reader, tin) != 0){
+    if(pthread_create(&(tids[tidx++]), NULL, reader, tin) != 0){
       perror("pthread_create");
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
   }
-  // TODO: unlink named semaphores, destory mutexes
+  // unlink named semaphores, destory mutexes
+  sem_unlink(READ_SEMAPHORE);
+  sem_unlink(WRITE_SEMAPHORE);
+  sem_unlink(SYNC_SHM_SEMAPHORE);
+  sem_unlink(MUTEX3);
   pthread_mutex_destroy(&queue_tail_mutex);
   pthread_mutex_destroy(&output_mutex);
+  // waits for all running threads before exiting CHECK
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }
