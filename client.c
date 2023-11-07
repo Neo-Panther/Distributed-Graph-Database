@@ -98,7 +98,7 @@ int main(void){
 
 
             if(shmdt(shmPtr)== -1){
-                perror("error in detaching\n");
+                perror("error in detaching");
                 exit(EXIT_FAILURE);
             
             }
@@ -113,5 +113,5 @@ int main(void){
 
 
 
-    return 0;
+    return EXIT_SUCCESS;
 }

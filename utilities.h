@@ -10,8 +10,7 @@
 #define SHM_BUF_SIZE 901*sizeof(int)
 
 // named semaphores' names
-#define WRITE_SEMAPHORE "/write"
-#define READ_SEMAPHORE "/read"
+
 
 // ipc permissions
 #define PERMS 0600

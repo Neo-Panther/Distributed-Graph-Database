@@ -17,10 +17,7 @@ int msgqid;
 key_t key;
 
 // variables for synchronization between threads
-pthread_mutex_t mutex2;
-unsigned int writer_count;
-sem_t* write_semaphore;
-sem_t* read_semaphore;
+
 /*******************************************************/
 
 void *writer(void* args){
@@ -58,22 +55,6 @@ void *writer(void* args){
   counter++;
   int number_of_nodes = shmPtr[counter++];
   // SYNC: Writer <Entry Section> Starts
-  if(pthread_mutex_lock(&mutex2) != 0){
-    printf("Mutex not initialized properly-1\n");
-    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-  }
-  writer_count += 1;
-  if(writer_count == 1){
-    if(sem_wait(read_semaphore) == -1){
-      perror("sem_wait-1");
-      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-    }
-  }
-  pthread_mutex_unlock(&mutex2);
-  if(sem_wait(write_semaphore) == -1){
-    perror("sem_wait-2");
-    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-  }
   
   // <Entry Section> Ends
   // <CRITICAL SECTION> starts
@@ -120,19 +101,7 @@ void *writer(void* args){
 
   // <CRITICAL SECTION> ends
   // SYNC: Writer <Exit Section>
-  if(sem_post(write_semaphore) == -1){
-    perror("sem_post-1");
-    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-  }
-  pthread_mutex_lock(&mutex2);
-  writer_count -= 1;
-  if(writer_count == 0){
-    if(sem_post(read_semaphore) == -1){
-      perror("sem_post-2");
-      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-    }
-  }
-  pthread_mutex_unlock(&mutex2);
+
   // <Exit Section> Ends
 
   // detach the shmPtr, ! destorying shm is the work of client
@@ -149,7 +118,7 @@ void *writer(void* args){
     perror("msgsnd");
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
-  return NULL;
+  return (void*)(intptr_t)EXIT_SUCCESS;
 }
 
 int main(void){
@@ -169,17 +138,7 @@ int main(void){
   /*****************************************/
 
   /******Initializing Semaphores and Mutexes*******/
-  if((write_semaphore = sem_open(WRITE_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
-    perror("sem_open-write");
-    exit(EXIT_FAILURE);
-  }
-  if((read_semaphore = sem_open(READ_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
-    perror("sem_open-read");
-    exit(EXIT_FAILURE);
-  }
-  // mutex attr is non-portable, thus we always use defaults. This function does not fail
-  pthread_mutex_init(&mutex2, NULL);
-  writer_count = 0;
+
   /*****************************************/
 
   while(1){
@@ -214,9 +173,7 @@ int main(void){
     }
   }
   // unlink named semaphores and destroy mutex
-  sem_unlink(read_semaphore);
-  sem_unlink(write_semaphore);
-  pthread_mutex_destroy(&mutex2);
+
   // wait for all threads to terminate before exiting
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }
