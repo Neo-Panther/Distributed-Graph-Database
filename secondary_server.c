@@ -16,90 +16,178 @@ key_t key;
 
 // variables for synchronization between threads
 /*******************************************************/
-
+pthread_mutex_t output_mutex;
+pthread_mutex_t queue_tail_mutex;
 // struct to send input for graph traversal
-struct dbfs_input {
+struct common_input {
   int number_of_nodes;
   int** adj_matrix;
-  int current_vertex;
   int* output_array;
-  int output_index;
   int* visited;
+  int output_index;  // TODO: need protection
 };
 
+struct common_input_bfs {
+  int number_of_nodes;
+  int** adj_matrix;
+  int* output_array;
+  int* visited;
+  int* queue;
+  int queue_tail;  // TODO: need protection
+  int output_index;  // TODO: need protection
+};
+
+// struct to send input to bfs nodes (bfs_helper) for level order traversal
+struct bfs_input{
+  int current_vertex;  // need to be reassigned for each thread
+  struct common_input_bfs* common;
+};
+
+struct dfs_input{
+  int current_vertex;  // need to be reassigned for each thread
+  struct common_input* common;
+};
+
+// agrs of type dfs input
 void* dfs(void* args){
-  struct dbfs_input* inp = (struct dbfs_input*)args;
-  // create a local copy of current vertex, so we can change it for input to next threads
+  struct dfs_input* inp = (struct dfs_input*)args;
+  // create a local copy of current vertex
   int current_vertex = inp->current_vertex;
-  inp->visited[current_vertex] = 1;
+  struct common_input* common = inp->common;
+  free(inp);
+  common->visited[current_vertex] = 1;
+  printf("DFS Thread:%lu:Current vertex b4 calls<%d> visited::", pthread_self(),current_vertex);
+  for(int i = 0; i < common->number_of_nodes; i++)
+    printf("%d ", common->visited[i]);
+    printf("\n");
   // create an array of tids to join them later (max n-1 new threads possible - other than this thread)
-  pthread_t* tids = (pthread_t*)calloc(inp->number_of_nodes-1, sizeof(pthread_t));
+  pthread_t* tids = (pthread_t*)calloc(common->number_of_nodes-1, sizeof(pthread_t));
   // index of the first unfilled tid
   int tidx = 0;
-  int last_vertex_in_path = 1;
-  for(int v = 0; v < inp->number_of_nodes; v++){
-    if(!inp->visited[v] && inp->adj_matrix[current_vertex][v]){
-      last_vertex_in_path = 0;
+  for(int v = 0; v < common->number_of_nodes; v++){
+    if(!common->visited[v] && common->adj_matrix[current_vertex][v]){
+      printf("DFS Thread:%lu: going from CV:%d: to:%d:\n", pthread_self(), current_vertex, v);
+      inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
       inp->current_vertex = v;
+      inp->common = common;
       int x;
-      if((x = pthread_create(&(tids[tidx++]), NULL, bfs, (void*)inp)) != 0){
-        printf("Thread creation failed with error-bfs %d\n", x);
+      if((x = pthread_create(&(tids[tidx++]), NULL, dfs, (void*)inp)) != 0){
+        printf("Thread creation failed with error-dfs %d\n", x);
         pthread_exit((void*)(intptr_t)EXIT_FAILURE);
       }
     }
   }
-  if(last_vertex_in_path){
-    inp->output_array[(inp->output_index)++] = current_vertex;
-  } else {
-    // join all created threads
-    for(int i = 0; i < tidx; i++){
-      int x;
-      if((x = pthread_join(tids[i], NULL)) != 0){
-        printf("Thread join failed with error %d\n", x);
-        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-      }
+  printf("DFS Thread:%lu:Current vertex<%d> aft calls\n", pthread_self(), current_vertex);
+  if(!tidx){
+    printf("DFS Thread:%lu:Adding CV:%d at output_index:%d\n", pthread_self(),current_vertex, common->output_index);
+    // this is the last vertex on a path
+    pthread_mutex_lock(&output_mutex);
+    common->output_array[(common->output_index)++] = current_vertex;
+    pthread_mutex_unlock(&output_mutex);
+  }
+  // join all created threads
+  while(tidx > 0){
+    int x;
+    if((x = pthread_join(tids[--tidx], NULL)) != 0){
+      printf("Thread join failed with error-dfs %d\n", x);
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
   }
+  printf("DFS Thread:%lu: ending\n", pthread_self());
   // free calloced memory
   free(tids);
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }
 
-void* bfs(void* args){
-  struct dbfs_input* inp = (struct dbfs_input*)args;
-  // create a local copy of current vertex, so we can change it for input to next threads
+void* bfs_helper(void* args){
+  // extract input info and free the address
+  struct bfs_input* inp = (struct bfs_input*)args;
+  struct common_input_bfs* common = inp->common;
   int current_vertex = inp->current_vertex;
-  inp->visited[current_vertex] = 1;
+  printf("BFS Helper Thread:%lu:Start CV:%d\n", pthread_self(), current_vertex);
+  free(inp);
+  printf("llk\n");
+  for(int v = 0; v < common->number_of_nodes; v++){
+    if(!common->visited[v] && common->adj_matrix[current_vertex][v]){
+      printf("BFS Helper Thread:%lu:add v to q:%d\n", pthread_self(), v);
+      pthread_mutex_lock(&queue_tail_mutex);
+      common->queue[(common->queue_tail)++] = v;
+      pthread_mutex_unlock(&queue_tail_mutex);
+      common->visited[v] = 1;
+    }
+  }
+  printf("knf\n");
+  return (void*)(intptr_t)EXIT_SUCCESS;
+}
+
+void* bfs(void* args){
+  struct dfs_input* inp = (struct dfs_input*)args;
+  int current_vertex = inp->current_vertex;
+  struct common_input* common = inp->common;
+  free(inp);
+  common->visited[current_vertex] = 1;
+  printf("BFS Main Thread:%lu:Current vertex b4 calls<%d> visited::", pthread_self(),current_vertex);
+  for(int i = 0; i < common->number_of_nodes; i++)
+    printf("%d ", common->visited[i]);
+    printf("\n");
   // create an array of tids to join them later (max n-1 new threads possible - other than this thread)
-  pthread_t* tids = (pthread_t*)calloc(inp->number_of_nodes-1, sizeof(pthread_t));
+  pthread_t* tids = (pthread_t*)calloc(common->number_of_nodes-1, sizeof(pthread_t));
   // index of the first unfilled tid
   int tidx = 0;
-  int last_vertex_in_path = 1;
-  for(int v = 0; v < inp->number_of_nodes; v++){
-    if(!inp->visited[v] && inp->adj_matrix[current_vertex][v]){
-      last_vertex_in_path = 0;
-      inp->current_vertex = v;
+
+  // populate the helper's struct
+  struct common_input_bfs* common_bfs = (struct common_input_bfs*)calloc(1, sizeof(struct common_input_bfs));
+  common_bfs->queue_tail = 1;
+  int queue_head = 0;
+  common_bfs->queue = (int*)calloc(common->number_of_nodes, sizeof(int));
+  common_bfs->queue[0] = current_vertex;
+  common_bfs->adj_matrix = common->adj_matrix;
+  common_bfs->number_of_nodes = common->number_of_nodes;
+  common_bfs->output_array = common->output_array;
+  common_bfs->output_index = common->output_index;
+  common_bfs->visited = common->visited;
+
+  // go to a new level sequentially
+  while(queue_head < common_bfs->queue_tail){
+    printf("BFS Thread Main:%lu:queue_head:%d:tail:%d:visited::", pthread_self(), queue_head, common_bfs->queue_tail);
+    for(int i = 0; i < common->number_of_nodes; i++)
+      printf("%d ", common->visited[i]);
+    printf("\n");
+    printf("BFS Thread Main:%lu:q::", pthread_self());
+    for(int i = queue_head; i < common_bfs->queue_tail; i++)
+      printf("%d ", common_bfs->queue[i]);
+    printf("\n");
+    int end = common_bfs->queue_tail;
+
+    struct bfs_input* helper_input;
+
+    // start new thread for each node at this level
+    while(queue_head < end){
       int x;
-      if((x = pthread_create(&(tids[tidx++]), NULL, bfs, (void*)inp)) != 0){
-        printf("Thread creation failed with error-bfs %d\n", x);
+      common_bfs->output_array[(common->output_index)++] = common_bfs->queue[queue_head];
+      helper_input = (struct bfs_input*)calloc(1, sizeof(struct bfs_input));
+      helper_input->common = common_bfs;
+      helper_input->current_vertex = common_bfs->queue[queue_head++];
+      if((x = pthread_create(&(tids[tidx++]), NULL, bfs_helper, (void*)helper_input)) != 0){
+        printf("Thread creation failed with error-dfs %d\n", x);
         pthread_exit((void*)(intptr_t)EXIT_FAILURE);
       }
     }
-  }
-  if(last_vertex_in_path){
-    inp->output_array[(inp->output_index)++] = current_vertex;
-  } else {
-    // join all created threads
-    for(int i = 0; i < tidx; i++){
+    // join all threads created above (complete the concurrent traversal of a level)
+    while(tidx > 0){
       int x;
-      if((x = pthread_join(tids[i], NULL)) != 0){
-        printf("Thread join failed with error %d\n", x);
+      if((x = pthread_join(tids[--tidx], NULL)) != 0){
+        printf("Thread join failed with error-bfs %d\n", x);
         pthread_exit((void*)(intptr_t)EXIT_FAILURE);
       }
     }
   }
   // free calloced memory
+  free(common_bfs->queue);
+  free(common_bfs);
   free(tids);
+  // current vertex freed in helper
+  // visited and adj_matrix will be freed outside
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }
 
@@ -117,7 +205,7 @@ void *reader(void* args){
   strcpy(file_name, tin+get_next_space(tin, nexti));
   // free the input struct after reading it
   free(args);
-  printf("Thread received input>sno:%d:opno:%d:fname:%s:\n", sequence_number, operation_number, file_name);
+  printf("Reader Thread received input:sno:%d:opno:%d:fname:%s:\n", sequence_number, operation_number, file_name);
 
   int shmid = shmget(sequence_number, SHM_BUF_SIZE, PERMS);
   if (shmid==-1){
@@ -134,6 +222,7 @@ void *reader(void* args){
   // counter - denotes the curent (relative) location of read pointer in the shm
   int counter = 0;
   // SYNC: busy wait until client is done writing to the shared memory
+  printf("Reader Thread waiting for client to finish writing...\n");
   while(shmPtr[counter] != 1);
   counter++;
   int starting_vertex = shmPtr[counter++];
@@ -142,7 +231,8 @@ void *reader(void* args){
     perror("shmdt");
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
-  // SYNC: Reader <Entry Section> Starts
+  printf("Reader received starting vertex: %d\n", starting_vertex);
+  // TODO: SYNC: Reader <Entry Section> Starts
 
   // <Entry Section> Ends
   // <CRITICAL SECTION> starts
@@ -154,18 +244,27 @@ void *reader(void* args){
   }
 
   // populate graph traversal input struct
-  struct dbfs_input * graph_input = (struct dbfs_input*)calloc(1, sizeof(struct dbfs_input));
-  graph_input->current_vertex = starting_vertex;
+  struct common_input * graph_input = (struct common_input*)calloc(1, sizeof(struct common_input));
   fscanf(file, "%d", &(graph_input->number_of_nodes));
   graph_input->output_index = 0;
-  // if the starting vertex comes in the ouput array, no other vertex will come and vice versa
-  graph_input->output_array = (int *)calloc(graph_input->number_of_nodes - 1, sizeof(int));
+  // max n vertices in output (of bfs)
+  graph_input->output_array = (int *)calloc(graph_input->number_of_nodes, sizeof(int));
   graph_input->visited = (int*)calloc(graph_input->number_of_nodes, sizeof(int));
   graph_input->adj_matrix = (int**)calloc(graph_input->number_of_nodes, sizeof(int*));
   for(int r = 0; r < graph_input->number_of_nodes; r++){
     graph_input->adj_matrix[r] = (int*)calloc(graph_input->number_of_nodes, sizeof(int));
     for(int c = 0; c < graph_input->number_of_nodes; c++)
       fscanf(file, "%d", &(graph_input->adj_matrix[r][c]));
+  }
+  printf("Reader sending bdfs input:starting_index:%d:output_index:%d:\
+  number_of_nodes:%d\n", starting_vertex-1, graph_input->output_index, graph_input->number_of_nodes);
+
+  printf(":Read Adj matrix:\n");
+  for(int i = 0; i < graph_input->number_of_nodes; i++){
+    for(int j = 0; j < graph_input->number_of_nodes; j++){
+      printf("%d ", graph_input->adj_matrix[i][j]);
+    }
+    printf("\n");
   }
 
   // close the file - all reading done
@@ -175,24 +274,31 @@ void *reader(void* args){
   }
 
   // <CRITICAL SECTION> ends
-  // SYNC: Reader <Exit Section>
+  // TODO: SYNC: Reader <Exit Section> Starts
 
   // <Exit Section> Ends
-
   // save thread tid for joining
   pthread_t tid;
   if(operation_number == 3){
     int x;
-    if((x = pthread_create(&tid, NULL, dfs, (void*)graph_input)) != 0){
+    struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
+    inp->common = graph_input;
+    inp->current_vertex = starting_vertex - 1;
+    if((x = pthread_create(&tid, NULL, dfs, (void*)inp)) != 0){
       printf("Thread creation failed with error-dfs %d\n", x);
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
+    printf("dfs thread active\n");
   } else {
     int x;
-    if((x = pthread_create(&tid, NULL, bfs, (void*)graph_input)) != 0){
+    struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
+    inp->common = graph_input;
+    inp->current_vertex = starting_vertex - 1;
+    if((x = pthread_create(&tid, NULL, bfs, (void*)inp)) != 0){
       printf("Thread creation failed with error-bfs %d\n", x);
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
+    printf("bfs thread active\n");
   }
   // join the thread
   int x;
@@ -200,7 +306,22 @@ void *reader(void* args){
     printf("Thread join failed with error %d\n", x);
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
+  printf("done3\n");
 
+  // create message (array as a string) and send to the client
+  printf("Reader received output:index:%d\n", graph_input->output_index);
+  for(int i = 0; i < graph_input->output_index; i++)
+    printf("%d ", graph_input->output_array[i]);
+  printf("\n");
+  sprintf(buf.mtext, "%d", graph_input->output_array[0] + 1);
+  for(int i = 1; i < graph_input->output_index; i++){
+    sprintf(buf.mtext + 1 + 2*(i - 1), " %d", graph_input->output_array[i] + 1);
+  }
+  buf.mtype  = sequence_number;
+  if(msgsnd(msgqid, &buf, strlen(buf.mtext) + 1, 0) == -1){
+    perror("msgsnd");
+    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+  }
   // free the memory assigned for the struct
   free(graph_input->output_array);
   free(graph_input->visited);
@@ -208,18 +329,7 @@ void *reader(void* args){
     free(graph_input->adj_matrix[v]);
   free(graph_input->adj_matrix);
   free(graph_input);
-
-  // create message (array as a string) and send to the client
-  sprintf(buf.mtext, "%d", graph_input->output_array[0]);
-  for(int i = 1; i <= graph_input->output_index; i++){
-    sprintf(buf.mtext + 1 + 2*(i - 1), " %d", graph_input->output_array[i]);
-  }
-  buf.mtype  = sequence_number;
-  if(msgsnd(msgqid, &buf, strlen(buf.mtext) + 1, 0) == -1){
-    perror("msgsnd");
-    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-  }
-  return NULL;
+  pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }
 
 int main(int argc, char const *argv[]){
@@ -250,7 +360,8 @@ int main(int argc, char const *argv[]){
   /*****************************************/
 
   /******Initializing Semaphores and Mutexes*******/
-
+  pthread_mutex_init(&queue_tail_mutex, NULL);
+  pthread_mutex_init(&output_mutex, NULL);
   /*****************************************/
 
   while(1){
@@ -284,7 +395,8 @@ int main(int argc, char const *argv[]){
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
   }
-  // unlink named semaphores, destory mutexes
-
+  // TODO: unlink named semaphores, destory mutexes
+  pthread_mutex_destroy(&queue_tail_mutex);
+  pthread_mutex_destroy(&output_mutex);
   pthread_exit((void*)(intptr_t)EXIT_SUCCESS);
 }

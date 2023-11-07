@@ -34,7 +34,7 @@ void *writer(void* args){
   strcpy(file_name, tin+get_next_space(tin, nexti));
   // free the input struct after reading it
   free(args);
-  printf("Thread received input>sno:%d:opno:%d:fname:%s:\n", sequence_number, operation_number, file_name);
+  printf("Writer Thread received input>sno:%d:opno:%d:fname:%s:\n", sequence_number, operation_number, file_name);
 
   int shmid = shmget(sequence_number, SHM_BUF_SIZE, PERMS);
   if (shmid==-1){
@@ -54,6 +54,7 @@ void *writer(void* args){
   while(shmPtr[counter] != 1);
   counter++;
   int number_of_nodes = shmPtr[counter++];
+  printf("Writer Thread received number of nodes: %d\n", number_of_nodes);
   // SYNC: Writer <Entry Section> Starts
   
   // <Entry Section> Ends
@@ -74,11 +75,13 @@ void *writer(void* args){
 
   // put the adjacency matrix
   for(int i = 1; i <= number_of_nodes; i++){
+    printf("Thread writing %d\n", shmPtr[counter]);
     if(fprintf(file, "%d", shmPtr[counter++]) < 0){
       perror("fprintf-2");
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
     for(int j = 2; j <= number_of_nodes; j++){
+      printf("Thread writing %d\n", shmPtr[counter]);
       if(fprintf(file, " %d", shmPtr[counter++]) < 0){
         perror("fprintf-3");
         pthread_exit((void*)(intptr_t)EXIT_FAILURE);
@@ -112,7 +115,9 @@ void *writer(void* args){
 
   // send operation output to client
   // create message depending on operation number
+  printf("Writer done writing-sending output: ");
   int msg_len = ((operation_number == 1) ? sprintf(buf.mtext, "File successfully added") : sprintf(buf.mtext, "File successfully modified")) + 1;
+  printf("%s\n", buf.mtext);
   buf.mtype  = sequence_number;
   if(msgsnd(msgqid, &buf, msg_len, 0) == -1){
     perror("msgsnd");
