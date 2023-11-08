@@ -155,7 +155,7 @@ void *reader(void* args){
   }
   syncShmPtr[SHM_READ_COUNT]--;
   if(syncShmPtr[SHM_SEQUENCE_NUMBER] == sequence_number)
-    syncShmPtr[SHM_SEQUENCE_NUMBER] = 101;
+    syncShmPtr[SHM_SEQUENCE_NUMBER] = INT16_MAX;  // assuming sequence number never exceeds this (<= 100 given)
   if(syncShmPtr[SHM_READ_COUNT] == 0){
     if(sem_post(write_semaphore) == -1){
       perror("sem_post-5");
