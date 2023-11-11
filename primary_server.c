@@ -6,8 +6,6 @@
 #include <semaphore.h>
 #include "./utilities.h"
 
-// TODO: handle starvation of readers by using sequence number ordering => allow readers before writers if their sequence number is lower
-
 /**Declaring global variables (shared between all threads)**/
 // msg q vars
 struct msgbuf buf;
@@ -20,6 +18,7 @@ int* syncShmPtr;
 // variables for synchronization between threads
 pthread_mutex_t mutex2;
 unsigned int writer_count;
+sem_t* seq_semaphore;
 sem_t* write_semaphore;
 sem_t* read_semaphore;
 sem_t* sync_shm_semaphore;
@@ -66,12 +65,20 @@ void *writer(void* args){
     perror("sem_wait-0");
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
+  // wait if there are earlier writers left to read
   while(syncShmPtr[SHM_SEQUENCE_NUMBER] < sequence_number){
     if(sem_post(sync_shm_semaphore) == -1){
       perror("sem_post-0");
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
-    sleep(1);
+    if(sem_wait(seq_semaphore) == -1){
+      perror("sem_wait-0.5");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+    if(sem_post(seq_semaphore) == -1){
+      perror("sem_post-0.5");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
     if(sem_wait(sync_shm_semaphore) == -1){
       perror("sem_wait-0");
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
@@ -214,6 +221,10 @@ int main(void){
     perror("sem_open-sync");
     exit(1);
   }
+  if((seq_semaphore = sem_open(SEQ_NUM_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-seq");
+    exit(1);
+  }
   // mutex attr is non-portable, thus we always use defaults. This function does not fail
   pthread_mutex_init(&mutex2, NULL);
   writer_count = 0;
@@ -277,6 +288,7 @@ int main(void){
   // unlink named semaphores and destroy mutex
   sem_unlink(READ_SEMAPHORE);
   sem_unlink(WRITE_SEMAPHORE);
+  sem_unlink(SEQ_NUM_SEMAPHORE);
   sem_unlink(SYNC_SHM_SEMAPHORE);
   pthread_mutex_destroy(&mutex2);
   // wait for all threads to terminate before exiting

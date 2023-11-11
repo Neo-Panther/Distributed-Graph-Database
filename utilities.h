@@ -15,9 +15,10 @@
 #define WRITE_SEMAPHORE "/write"
 #define READ_SEMAPHORE "/read"
 #define SYNC_SHM_SEMAPHORE "/syncshm"
+#define SEQ_NUM_SEMAPHORE "/sequence"
 // process sync shm key
 #define SYNC_SHM_KEY 1025
-#define SYNC_SHM_SIZE 3*sizeof(int)
+#define SYNC_SHM_SIZE 2*sizeof(int)
 #define SHM_READ_COUNT 0
 #define SHM_SEQUENCE_NUMBER 1
 

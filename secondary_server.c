@@ -16,10 +16,11 @@ key_t key;
 
 // variables for synchronization between threads
 /*******************************************************/
-sem_t* mutex3;  // name
+sem_t* mutex3;
 sem_t* write_semaphore;
 sem_t* read_semaphore;
 sem_t* sync_shm_semaphore;
+sem_t* seq_semaphore;
 
 // sync shm ptr
 int* syncShmPtr;
@@ -80,8 +81,13 @@ void *reader(void* args){
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
   syncShmPtr[SHM_READ_COUNT]++;
-  if(syncShmPtr[SHM_SEQUENCE_NUMBER] > sequence_number)
+  if(syncShmPtr[SHM_SEQUENCE_NUMBER] > sequence_number){
     syncShmPtr[SHM_SEQUENCE_NUMBER] = sequence_number;
+    if(sem_wait(seq_semaphore) == -1){
+      perror("sem_wait-2.5");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
   if(syncShmPtr[SHM_READ_COUNT] == 1){
     if(sem_post(sync_shm_semaphore) == -1){
       perror("sem_post-2");
@@ -107,7 +113,7 @@ void *reader(void* args){
   }
 
   // <Entry Section> Ends
-  printf("Entry->Critical\n");
+  printf("Entry Section to Critical Section\n");
   // <CRITICAL SECTION> starts
   // open the file in read mode (it is assumed that it exists)
   FILE* file = fopen(file_name, "r");
@@ -154,8 +160,13 @@ void *reader(void* args){
     pthread_exit((void*)(intptr_t)EXIT_FAILURE);
   }
   syncShmPtr[SHM_READ_COUNT]--;
-  if(syncShmPtr[SHM_SEQUENCE_NUMBER] == sequence_number)
+  if(syncShmPtr[SHM_SEQUENCE_NUMBER] == sequence_number){
     syncShmPtr[SHM_SEQUENCE_NUMBER] = INT16_MAX;  // assuming sequence number never exceeds this (<= 100 given)
+    if(sem_post(seq_semaphore) == -1){
+      perror("sem_post-2.5");
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+  }
   if(syncShmPtr[SHM_READ_COUNT] == 0){
     if(sem_post(write_semaphore) == -1){
       perror("sem_post-5");
@@ -168,45 +179,51 @@ void *reader(void* args){
   }
 
   // <Exit Section> Ends
+
   // save thread tid for joining
   pthread_t tid;
-  if(operation_number == 3){
-    int x;
-    struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
-    inp->common = graph_input;
-    inp->current_vertex = starting_vertex - 1;
-    if((x = pthread_create(&tid, NULL, dfs, (void*)inp)) != 0){
-      printf("Thread creation failed with error-dfs %d\n", x);
-      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-    }
-    printf("dfs thread active\n");
-  } else {
-    int x;
-    struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
-    inp->common = graph_input;
-    inp->current_vertex = starting_vertex - 1;
-    if((x = pthread_create(&tid, NULL, bfs, (void*)inp)) != 0){
-      printf("Thread creation failed with error-bfs %d\n", x);
-      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-    }
-    printf("bfs thread active\n");
-  }
-  // join the thread
-  int x;
-  if((x = pthread_join(tid, NULL)) != 0){
-    printf("Thread join failed with error %d\n", x);
-    pthread_exit((void*)(intptr_t)EXIT_FAILURE);
-  }
-  printf("done3\n");
 
-  // create message (array as a string) and send to the client
-  printf("Reader received output:index:%d\n", graph_input->output_index);
-  for(int i = 0; i < graph_input->output_index; i++)
-    printf("%d ", graph_input->output_array[i]);
-  printf("\n");
-  sprintf(buf.mtext, "%d", graph_input->output_array[0] + 1);
-  for(int i = 1; i < graph_input->output_index; i++){
-    sprintf(buf.mtext + 1 + 2*(i - 1), " %d", graph_input->output_array[i] + 1);
+  // check if the input is correct - this is here because we need to read the file to check for correctness, reading file happens in the critical section
+  if(starting_vertex > graph_input->number_of_nodes){
+    sprintf(buf.mtext, "Starting vertex not present in graph");
+  } else {
+    if(operation_number == 3){
+      int x;
+      struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
+      inp->common = graph_input;
+      inp->current_vertex = starting_vertex - 1;
+      if((x = pthread_create(&tid, NULL, dfs, (void*)inp)) != 0){
+        printf("Thread creation failed with error-dfs %d\n", x);
+        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+      }
+      printf("dfs thread active\n");
+    } else {
+      int x;
+      struct dfs_input* inp = (struct dfs_input*)calloc(1, sizeof(struct dfs_input));
+      inp->common = graph_input;
+      inp->current_vertex = starting_vertex - 1;
+      if((x = pthread_create(&tid, NULL, bfs, (void*)inp)) != 0){
+        printf("Thread creation failed with error-bfs %d\n", x);
+        pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+      }
+      printf("bfs thread active\n");
+    }
+    // join the thread
+    int x;
+    if((x = pthread_join(tid, NULL)) != 0){
+      printf("Thread join failed with error %d\n", x);
+      pthread_exit((void*)(intptr_t)EXIT_FAILURE);
+    }
+
+    // create message (array as a string) and send to the client
+    printf("Reader received output:index:%d\n", graph_input->output_index);
+    for(int i = 0; i < graph_input->output_index; i++)
+      printf("%d ", graph_input->output_array[i]);
+    printf("\n");
+    sprintf(buf.mtext, "%d", graph_input->output_array[0] + 1);
+    for(int i = 1; i < graph_input->output_index; i++){
+      sprintf(buf.mtext + 1 + 2*(i - 1), " %d", graph_input->output_array[i] + 1);
+    }
   }
   buf.mtype  = sequence_number;
   if(msgsnd(msgqid, &buf, strlen(buf.mtext) + 1, 0) == -1){
@@ -270,6 +287,10 @@ int main(int argc, char const *argv[]){
     perror("sem_open-read");
     exit(1);
   }
+  if((seq_semaphore = sem_open(SEQ_NUM_SEMAPHORE, O_CREAT, PERMS, 1)) == SEM_FAILED){
+    perror("sem_open-seq");
+    exit(1);
+  }
   pthread_mutex_init(&queue_tail_mutex, NULL);
   pthread_mutex_init(&output_mutex, NULL);
   /*****************************************/
@@ -324,10 +345,17 @@ int main(int argc, char const *argv[]){
       pthread_exit((void*)(intptr_t)EXIT_FAILURE);
     }
   }
+
+  // detach sync shm - destroyed in load balancer
+  if(shmdt(syncShmPtr)== -1){
+    perror("shmdt-sync");
+    exit(EXIT_FAILURE);
+  }
   // unlink named semaphores, destory mutexes
   sem_unlink(READ_SEMAPHORE);
   sem_unlink(WRITE_SEMAPHORE);
   sem_unlink(SYNC_SHM_SEMAPHORE);
+  sem_unlink(SEQ_NUM_SEMAPHORE);
   sem_unlink(MUTEX3);
   pthread_mutex_destroy(&queue_tail_mutex);
   pthread_mutex_destroy(&output_mutex);

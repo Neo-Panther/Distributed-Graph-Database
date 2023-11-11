@@ -24,12 +24,12 @@ int main(void){
   while(1){
     printf("\n::Available Operation Numbers::\n");
     printf ("Enter 1 to Add a new graph to the database\n");
-    printf ("Enter 2 Modify an existing graph of the database\n");
+    printf ("Enter 2 to Modify an existing graph of the database\n");
     printf ("Enter 3 to Perform DFS on an existing graph of the database\n");
     printf ("Enter 4 to Perform BFS on an existing graph of the database\n");
     printf ("-----------------------------------------------------------------\n");
     // get common user input
-    printf ("Enter Sequence Number\n");
+    printf ("Enter Sequence Number (The system assumes this is unique): ");
     scanf("%d",&sequence_number);
     printf ("Enter Operation Number: ");
     scanf("%d",&operation_number);
@@ -39,6 +39,14 @@ int main(void){
     }
     printf ("Enter Graph File Name: ");
     scanf("%s",file_name);
+
+    if (operation_number == 1 && access(file_name, F_OK) == 0){
+      printf("File already exists, use operation 2 to modify it.");
+      continue;
+    } else if (access(file_name, F_OK) != 0){
+      printf("File doesn't exits, use operation 1 to create it.");
+      continue;
+    }
 
     msg_len = sprintf(buf.mtext, "%d %d %s", sequence_number, operation_number, file_name) + 1;
     buf.mtype  = LOAD_BALANCER;
@@ -75,7 +83,7 @@ int main(void){
       shmPtr[0] = 1;
     } else if(operation_number==3 || operation_number ==4){
       // get user input and write to shared memory - send to servers
-      printf("Enter starting vertex: ");
+      printf("Enter starting vertex (the system assumes this to be correct): ");
       int starting_vertex;
       scanf("%d",&starting_vertex);
       shmPtr[1]=starting_vertex;
