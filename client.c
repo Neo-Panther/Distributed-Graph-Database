@@ -43,8 +43,8 @@ int main(void){
     if (operation_number == 1 && access(file_name, F_OK) == 0){
       printf("File already exists, use operation 2 to modify it.");
       continue;
-    } else if (access(file_name, F_OK) != 0){
-      printf("File doesn't exits, use operation 1 to create it.");
+    } else if (operation_number != 1 && access(file_name, F_OK) != 0){
+      printf("File doesn't exist, use operation 1 to create it.");
       continue;
     }
 
