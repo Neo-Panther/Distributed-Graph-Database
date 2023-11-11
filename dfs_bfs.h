@@ -67,7 +67,7 @@ void* dfs(void* args){
       }
     }
   }
-  printf("DFS Thread:%lu:Current vertex<%d> aft calls\n", pthread_self(), current_vertex);
+  printf("DFS Thread:%lu:Current vertex<%d> after calls\n", pthread_self(), current_vertex);
   if(!tidx){
     printf("DFS Thread:%lu:Adding CV:%d at output_index:%d\n", pthread_self(),current_vertex, common->output_index);
     // this is the last vertex on a path
@@ -114,7 +114,7 @@ void* bfs(void* args){
   struct common_input* common = inp->common;
   free(inp);
   common->visited[current_vertex] = 1;
-  printf("BFS Main Thread:%lu:Current vertex b4 calls<%d> visited::", pthread_self(),current_vertex);
+  printf("BFS Main Thread:%lu:Current vertex before calls<%d> visited::", pthread_self(),current_vertex);
   for(int i = 0; i < common->number_of_nodes; i++)
     printf("%d ", common->visited[i]);
     printf("\n");
