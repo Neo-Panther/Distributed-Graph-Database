@@ -260,7 +260,7 @@ int main(void){
       while(tidx > 0){
         int x;
         if((x = pthread_join(tids[--tidx], NULL)) != 0){
-          printf("Thread join failed with error-bfs %d\n", x);
+          printf("Thread join failed with error %d\n", x);
           pthread_exit((void*)(intptr_t)EXIT_FAILURE);
         }
       }
@@ -268,7 +268,7 @@ int main(void){
     }
 
     // allocate new space every time (to preserve other threads input) - free inside thread subroutine
-    tin = (char*)calloc(20, sizeof(char));
+    tin = (char*)calloc(100, sizeof(char));
 
     // set required values in tin
     strcpy(tin, buf.mtext);

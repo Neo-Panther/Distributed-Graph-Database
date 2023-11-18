@@ -76,8 +76,8 @@ int main(void){
       printf ("Enter adjacency matrix\nEach row on a separate line\nElements of a single row separated by single space characters::\n");
 
       for(int i=2;i<=number_of_nodes*number_of_nodes + 1;i++){
-          scanf("%d",&node);
-          shmPtr[i]=node;
+        scanf("%d",&node);
+        shmPtr[i]=node;
       }
       // SYNC: shmPtr[0] = 1 implies data has been successfully written to shared memory, the server thread can start reading now
       shmPtr[0] = 1;

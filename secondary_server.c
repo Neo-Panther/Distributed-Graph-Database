@@ -35,7 +35,7 @@ void *reader(void* args){
   int nexti = get_next_space(tin, 0);
 
   int operation_number = atoi(tin+nexti);
-  char file_name[10];
+  char file_name[100];
   strcpy(file_name, tin+get_next_space(tin, nexti));
   // free the input struct after reading it
   free(args);
@@ -333,7 +333,7 @@ int main(int argc, char const *argv[]){
     }
 
     // allocate new space every time (to preserve other threads input) - free inside thread subroutine
-    tin = (char*)calloc(20, sizeof(char));
+    tin = (char*)calloc(100, sizeof(char));
 
     // set required values in tin
     strcpy(tin, buf.mtext);
